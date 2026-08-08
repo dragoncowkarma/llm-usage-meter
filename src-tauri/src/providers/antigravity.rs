@@ -229,7 +229,7 @@ fn agy_binary(home: &std::path::Path) -> Option<PathBuf> {
 /// `QuotaWindow` entries.
 ///
 /// Output format (tab-separated):
-/// ```
+/// ```text
 /// Gemini Models\tWeekly Limit Remaining\t66%\t2026-08-12T09:40:25Z
 /// ```
 ///
