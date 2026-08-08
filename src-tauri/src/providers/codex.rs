@@ -321,13 +321,21 @@ struct RolloutScan {
 ///
 /// Returns `None` when the models disagree on price or any is unknown — in
 /// either case the per-model token split we don't have would change the total,
-/// so there is no correct number to show.
+/// so there is no correct number to show. All four rate components must
+/// match, not just input/output: `cost_usd` also applies each model's
+/// `cache_write`/`cache_read` multipliers, so two models that bill input and
+/// output identically but cache differently would still mis-price the cache
+/// portion of the total if only input/output were compared.
 fn uniform_price(ctx: &ProviderContext, models: &BTreeSet<String>) -> Option<String> {
     let first = models.iter().next()?;
     let base = ctx.prices.lookup(first)?;
     for m in models.iter().skip(1) {
         let p = ctx.prices.lookup(m)?;
-        if p.input != base.input || p.output != base.output {
+        if p.input != base.input
+            || p.output != base.output
+            || p.cache_write != base.cache_write
+            || p.cache_read != base.cache_read
+        {
             return None;
         }
     }
@@ -570,6 +578,40 @@ mod tests {
         // A single unknown model must not fall back to some other model's price.
         assert!(uniform_price(&ctx, &set(&["codex-auto-review"])).is_none());
         assert!(uniform_price(&ctx, &BTreeSet::new()).is_none());
+    }
+
+    #[test]
+    fn identical_input_output_rates_are_not_enough_if_cache_multipliers_differ() {
+        // Two models can bill input/output identically but cache differently —
+        // cost_usd() applies cache_write/cache_read multipliers too, so those
+        // must also match before a session's tokens can be priced as one rate.
+        let dir = temp_dir("cache-mult-mismatch");
+        std::fs::create_dir_all(&dir).unwrap();
+        let override_path = dir.join("pricing.json");
+        std::fs::write(
+            &override_path,
+            r#"{
+                "model-a": {"input": 2.0, "output": 8.0, "cacheWrite": 1.25, "cacheRead": 0.1},
+                "model-b": {"input": 2.0, "output": 8.0, "cacheWrite": 2.0,  "cacheRead": 0.1}
+            }"#,
+        )
+        .unwrap();
+
+        let env = crate::platform::HostEnv::detect();
+        let prices = crate::pricing::PriceTable::load(&override_path);
+        let ctx = price_ctx(&env, &prices);
+        let set = |ids: &[&str]| ids.iter().map(|s| (*s).to_string()).collect::<BTreeSet<_>>();
+
+        assert!(
+            uniform_price(&ctx, &set(&["model-a"])).is_some(),
+            "a single model is always self-consistent"
+        );
+        assert!(
+            uniform_price(&ctx, &set(&["model-a", "model-b"])).is_none(),
+            "same input/output but different cache_write must not be treated as uniform"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

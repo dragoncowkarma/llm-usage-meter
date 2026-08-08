@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    # Type-checking, the Vite build, and Vitest need only Node — no native
+    # toolchain — so this runs on the fastest available runner rather than
+    # matching the app's target OS.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # tsc --noEmit + vite build. Also compiles the schema-drift contract
+      # test file, so a TypeScript-side type error in it fails here too.
+      - run: npm run build
+
+      # Includes src/lib/format.test.ts and the usage.contract.test.ts half
+      # of the Rust <-> TypeScript shape contract (see contract/usage-report-keys.json).
+      - run: npm test
+
+  rust:
+    # This project currently only ships a macOS build (see README) — the tray
+    # UI and platform layer aren't wired up for Linux/Windows yet, and a
+    # Linux runner would need webkit2gtk/libayatana-appindicator system
+    # packages just to compile the Tauri crate. Match the real target.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Runs the parser unit tests (Claude Code / Codex / Antigravity),
+      # pricing/model tests, and the Rust half of the shape contract
+      # (`schema_drift`, in src-tauri/src/lib.rs). `dump_real_report` is
+      # `#[ignore]`d — it reads this machine's actual ~/.claude etc., which
+      # doesn't exist on a CI runner, so it's correctly skipped by default.
+      - run: cargo test
+        working-directory: src-tauri

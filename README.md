@@ -101,12 +101,33 @@ needs a Developer ID and notarization.
 ## Tests
 
 ```bash
-cd src-tauri && cargo test
+cd src-tauri && cargo test   # parsers, pricing, platform layer, the shape contract
+npm test                      # src/lib/format.ts, the shape contract's TS half
 ```
 
-The suite covers the parsers against the real on-disk formats: quota-window
-shapes, transcript deduplication, cache-TTL splitting, price lookup, null
-rate-limit payloads, and the platform path layer for both macOS and Windows.
+Both run in CI on every push and pull request (`.github/workflows/ci.yml`).
+
+The Rust suite covers the parsers against the real on-disk formats:
+quota-window shapes, transcript deduplication, cache-TTL splitting, price
+lookup, null rate-limit payloads, and the platform path layer for both macOS
+and Windows. The frontend suite covers `format.ts`'s date/money edge cases
+(the sub-$1 display, the exact-zero "resetting" boundary, day/hour/minute
+cutovers).
+
+### Keeping the Rust ↔ TypeScript payload shape in sync
+
+`src/types/usage.ts` is hand-maintained in parallel with
+`src-tauri/src/model.rs` / `collector.rs` — nothing generates one from the
+other. `contract/usage-report-keys.json` is the guardrail: it's a single
+checked-in list of each IPC type's field names, and both
+`src-tauri/src/lib.rs` (`mod schema_drift`) and
+`src/types/usage.contract.test.ts` assert their own runtime shape against it.
+Renaming, adding, or removing a field on either side without updating the
+contract file *and* the other language's type fails that language's test
+immediately, instead of showing up as `undefined` in the popover. It's a
+field-name check, not a full type check — a field changing type while
+keeping its name isn't caught; only real codegen (`ts-rs`/`specta`) closes
+that gap.
 
 ## What it reads
 

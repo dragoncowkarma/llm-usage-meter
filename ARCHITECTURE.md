@@ -8,6 +8,17 @@ Everything that touches the filesystem lives in Rust. The webview has no `fs`,
 in one auditable place, and a compromised web layer cannot go wandering through
 `~/.claude` or `~/.codex`.
 
+That guarantee is enforced server-side, not just by frontend convention. The
+one command that opens something outside the app's own state —
+`reveal_source`, which reveals a source file in Finder — takes a path string
+from the webview, but `AppState::is_known_source_path()` rejects anything
+that isn't an *exact* match to a `SourceRef.path` the app itself put in the
+most recently collected report (no prefix/substring matching, so
+`/known/path/../../etc/passwd` and `/known/path/extra` are both rejected).
+The frontend only ever round-trips a path it was handed, so this changes
+nothing for legitimate use; it just means the guarantee doesn't rely on the
+frontend continuing to behave.
+
 It is also the faster arrangement: scanning hundreds of JSONL transcripts is
 I/O-bound work that would be miserable to do across an IPC boundary.
 
@@ -115,6 +126,16 @@ local-only turns. `RateLimits::has_data()` rejects those — treating a null
 payload as "0% used" would be a lie, and the newest *non-null* observation
 wins across sessions.
 
+A single session's `total_token_usage` routinely spans several models (a
+planner, a coder, an auto-reviewer), and Codex reports tokens per session, not
+per model — there is no honest way to split them. `uniform_price()` therefore
+only computes a cost when every model seen in the window shares an identical
+price on **all four** rate components (input, output, cache write, cache
+read), not just input/output — two models can bill input/output the same
+while pricing cache differently, and `cost_usd()` applies each model's own
+cache multipliers. Otherwise cost is omitted with a note naming the models
+seen, rather than guessing.
+
 ### Antigravity details
 
 This is the honest-limits case. Its conversation store is SQLite whose payloads
@@ -132,6 +153,14 @@ A quota row appears only when a 429 was observed in the last 15 minutes, and it
 is labelled "Quota exhausted (observed)" — a statement about an observation,
 not a quota reading.
 
+The `errorreport.go` match is a real dependency on an internal filename of a
+tool this project doesn't control — if a future Antigravity release renames
+it, the count would silently drop to zero. `scan_logs` guards against that
+going unnoticed: if a log file has `RESOURCE_EXHAUSTED` lines but none of them
+match the specific marker, it's flagged as `marker_possibly_stale`, and the
+snapshot gets a note saying detection may be understated rather than quietly
+reporting a clean 0.
+
 ## Pricing
 
 `pricing.rs` holds a compiled-in table, overridable by
@@ -144,6 +173,22 @@ Lookup tolerates the version suffixes vendors append
 (`claude-haiku-4-5-20251001`), with longest-prefix-wins so `gpt-5-codex` beats
 `gpt-5`. An unknown model returns `None`, never `0.0` — a zero would silently
 understate a bill, so the UI marks the total partial instead.
+
+## Keeping the Rust and TypeScript shapes in sync
+
+`src/types/usage.ts` mirrors `model.rs`/`collector.rs` by hand — there's no
+codegen tying them together, so nothing stops a Rust field being renamed,
+added, or removed without the matching edit on the TypeScript side; it would
+compile fine on both sides and only fail at runtime as `undefined` in the
+popover. `contract/usage-report-keys.json` closes that gap: it's a checked-in,
+per-type list of exact field names, and both `src-tauri/src/lib.rs`
+(`mod schema_drift`) and `src/types/usage.contract.test.ts` build a real
+instance of every IPC type and assert its top-level JSON/object keys match
+the file. Change a field on either side without updating the contract file
+*and* the other language's type, and that language's test suite fails
+immediately. It's a key-*name* check, not a structural type check — a field
+changing type while keeping its name isn't caught by this, only by actual
+codegen (`ts-rs`/`specta`, not adopted here).
 
 ## Menu bar behaviour
 

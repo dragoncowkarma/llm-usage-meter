@@ -37,6 +37,21 @@ const LOG_TAIL_BYTES: u64 = 512 * 1024;
 /// A 429 older than this is history, not current state.
 const EXHAUSTION_FRESH_SECS: i64 = 15 * 60;
 
+/// The call site each rejection is finally reported from. Chosen deliberately
+/// narrow: one rejected request produces several log lines as the error
+/// propagates through the stack (`stream_handler.go`, `executor.go`, …), and
+/// this is the one that appears exactly once per rejection, so it's what
+/// makes the hit count mean "requests refused" rather than "lines logged".
+const REJECTION_MARKER: &str = "errorreport.go";
+/// A looser signal used only to detect that *some* rejection activity is
+/// present even when `REJECTION_MARKER` doesn't match — e.g. because a CLI
+/// update renamed its internal error-reporting file. This over-counts (many
+/// lines per rejection) so it is never used as the hit count itself; it only
+/// distinguishes "no rejections happened" from "rejections happened but this
+/// build's marker is stale," so a broken marker degrades to a visible warning
+/// instead of a silent 0.
+const REJECTION_SIGNAL: &str = "RESOURCE_EXHAUSTED";
+
 /// Candidate roots, newest layout first.
 ///
 /// Antigravity has moved its state across releases (`~/.antigravity` →
@@ -92,6 +107,7 @@ impl UsageProvider for AntigravityProvider {
 
         let mut activity = ActivityStats::default();
         let mut exhaustion: Option<i64> = None;
+        let mut marker_possibly_stale = false;
 
         for root in &roots {
             let stats = read_activity(root, cutoff, day_start);
@@ -110,6 +126,7 @@ impl UsageProvider for AntigravityProvider {
             let logs = scan_logs(&root.join("log"), cutoff);
             activity.rate_limit_hits += logs.hits;
             exhaustion = max_opt(exhaustion, logs.latest_hit_at);
+            marker_possibly_stale |= logs.marker_possibly_stale;
             if logs.hits > 0 {
                 snap.sources.push(SourceRef {
                     kind: "quota-error-log".into(),
@@ -144,6 +161,18 @@ impl UsageProvider for AntigravityProvider {
                 "Installed, but no Antigravity activity in the last {} days.",
                 ctx.lookback_days
             ));
+        }
+
+        // Never let the one hard quota signal this provider has go silently
+        // to zero because the CLI changed its log format underneath us — say
+        // so, rather than reporting a clean 0 that looks like "no rejections".
+        if marker_possibly_stale {
+            snap.notes.push(
+                "Some log lines look like quota rejections but didn't match this build's \
+                 detection pattern — the rate-limit count above may be understated. If this \
+                 persists, Antigravity's log format has likely changed."
+                    .into(),
+            );
         }
 
         snap.notes.push(
@@ -280,6 +309,10 @@ fn read_activity(root: &Path, cutoff: i64, day_start: i64) -> ActivityRead {
 struct LogScan {
     hits: u64,
     latest_hit_at: Option<i64>,
+    /// True if a file had `REJECTION_SIGNAL` lines but none matched
+    /// `REJECTION_MARKER` — i.e. rejections likely happened but this build's
+    /// detection pattern didn't catch them.
+    marker_possibly_stale: bool,
 }
 
 fn scan_logs(log_dir: &Path, cutoff: i64) -> LogScan {
@@ -309,13 +342,15 @@ fn scan_logs(log_dir: &Path, cutoff: i64) -> LogScan {
         // each one produces, so the counter tracks refused requests.
         let hits = text
             .lines()
-            .filter(|l| l.contains("RESOURCE_EXHAUSTED") && l.contains("errorreport.go"))
+            .filter(|l| l.contains(REJECTION_SIGNAL) && l.contains(REJECTION_MARKER))
             .count() as u64;
         if hits > 0 {
             out.hits += hits;
             // Line-level timestamps are glog-formatted without a year; the
             // file's mtime is the reliable upper bound for "when".
             out.latest_hit_at = max_opt(out.latest_hit_at, Some(mtime));
+        } else if text.lines().any(|l| l.contains(REJECTION_SIGNAL)) {
+            out.marker_possibly_stale = true;
         }
     }
     out
@@ -420,6 +455,10 @@ mod tests {
         let scan = scan_logs(&logs, 0);
         assert_eq!(scan.hits, 1);
         assert!(scan.latest_hit_at.is_some());
+        assert!(
+            !scan.marker_possibly_stale,
+            "the marker matched, so nothing here should look stale"
+        );
 
         std::fs::remove_dir_all(&root).ok();
     }
@@ -434,6 +473,29 @@ mod tests {
         let scan = scan_logs(&logs, 0);
         assert_eq!(scan.hits, 0);
         assert!(scan.latest_hit_at.is_none());
+        assert!(!scan.marker_possibly_stale, "no rejection signal at all — nothing is stale");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_renamed_call_site_degrades_to_a_visible_warning_not_a_silent_zero() {
+        // Simulates a future Antigravity release that renamed its internal
+        // error-reporting file: RESOURCE_EXHAUSTED activity is present, but
+        // none of it comes from errorreport.go anymore.
+        let root = temp_dir("stale-marker");
+        let logs = root.join("log");
+        std::fs::create_dir_all(&logs).unwrap();
+        let mut f = std::fs::File::create(logs.join("cli-3.log")).unwrap();
+        writeln!(f, "ERROR: E0804 16:38:57.508857 257 report_error.go:99] RESOURCE_EXHAUSTED (code 429): Individual quota reached.").unwrap();
+        drop(f);
+
+        let scan = scan_logs(&logs, 0);
+        assert_eq!(scan.hits, 0, "the old marker genuinely doesn't match anymore");
+        assert!(
+            scan.marker_possibly_stale,
+            "broader RESOURCE_EXHAUSTED activity must still be flagged, not silently dropped"
+        );
 
         std::fs::remove_dir_all(&root).ok();
     }

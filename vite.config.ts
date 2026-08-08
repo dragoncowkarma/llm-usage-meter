@@ -1,8 +1,10 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-// @ts-expect-error process is a nodejs global
+// `process` is now typed via @types/node (added for the Node-based test
+// helpers), so this no longer needs a `@ts-expect-error` suppression.
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
@@ -20,5 +22,12 @@ export default defineConfig({
     // The webview is a fixed, current WebKit — no legacy transpilation needed.
     target: "safari15",
     sourcemap: false,
+  },
+  test: {
+    // Pure-logic tests only so far (lib/format.ts, the shared IPC-shape
+    // contract) — none of it touches the DOM, so the default Node
+    // environment is enough and there's no jsdom dependency to add.
+    environment: "node",
+    include: ["src/**/*.test.ts"],
   },
 });
