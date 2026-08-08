@@ -24,12 +24,12 @@ export default function Header({
   onToggleSettings,
 }: Props) {
   return (
-    <header className="flex items-center gap-2 border-b border-neutral-200/60 px-3 py-2.5 dark:border-neutral-700/50">
+    <header className="flex items-center gap-2 border-b border-stone-200/60 px-3 py-2.5 dark:border-stone-700/50">
       <div className="min-w-0">
-        <h1 className="truncate text-[14px] font-semibold text-neutral-800 dark:text-neutral-100">
+        <h1 className="truncate text-[14px] font-semibold text-stone-800 dark:text-stone-100">
           LLM Usage
         </h1>
-        <p className="text-[11px] text-neutral-600 dark:text-neutral-400">
+        <p className="text-[11px] text-stone-600 dark:text-stone-300">
           {peakPercent === null ? (
             "no quota reported"
           ) : (
@@ -51,7 +51,7 @@ export default function Header({
           disabled={loading}
           aria-label="Refresh now"
           title="Refresh now"
-          className="rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-500/10 hover:text-neutral-800 disabled:opacity-40 dark:text-neutral-400 dark:hover:text-neutral-100"
+          className="rounded-lg p-1.5 text-stone-500 transition-colors hover:bg-stone-500/10 hover:text-stone-800 disabled:opacity-40 dark:text-stone-300 dark:hover:text-stone-100"
         >
           <RefreshIcon className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
@@ -61,10 +61,10 @@ export default function Header({
           aria-label="Settings"
           aria-expanded={settingsOpen}
           title="Settings"
-          className={`rounded-lg p-1.5 transition-colors hover:bg-neutral-500/10 ${
+          className={`rounded-lg p-1.5 transition-colors hover:bg-stone-500/10 ${
             settingsOpen
-              ? "bg-neutral-500/10 text-neutral-800 dark:text-neutral-100"
-              : "text-neutral-500 dark:text-neutral-400"
+              ? "bg-stone-500/10 text-stone-800 dark:text-stone-100"
+              : "text-stone-500 dark:text-stone-300"
           }`}
         >
           <GearIcon />

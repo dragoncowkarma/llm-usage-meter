@@ -68,9 +68,9 @@ export const severityBar: Record<Severity, string> = {
 };
 
 export const severityText: Record<Severity, string> = {
-  normal: "text-emerald-600 dark:text-emerald-400",
-  warning: "text-amber-600 dark:text-amber-400",
-  critical: "text-rose-600 dark:text-rose-400",
+  normal: "text-emerald-600 dark:text-emerald-300",
+  warning: "text-amber-600 dark:text-amber-300",
+  critical: "text-rose-600 dark:text-rose-300",
 };
 
 /**

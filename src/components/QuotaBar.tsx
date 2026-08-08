@@ -23,10 +23,10 @@ export default function QuotaBar({ quota, now }: Props) {
     // legible; the "· idle" tag alone carries the dormant signal.
     <div>
       <div className="flex items-baseline justify-between gap-2 text-[12px]">
-        <span className="truncate text-neutral-700 dark:text-neutral-300">
+        <span className="truncate text-stone-700 dark:text-stone-200">
           {quota.label}
           {!quota.isActive && (
-            <span className="ml-1 font-normal text-neutral-500 dark:text-neutral-400">
+            <span className="ml-1 font-normal text-stone-500 dark:text-stone-300">
               · idle
             </span>
           )}
@@ -37,7 +37,7 @@ export default function QuotaBar({ quota, now }: Props) {
       </div>
 
       <div
-        className={`mt-1 h-1.5 w-full overflow-hidden rounded-full bg-neutral-200/80 dark:bg-neutral-700/70 ${
+        className={`mt-1 h-1.5 w-full overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-700/80 ${
           quota.isActive ? "" : "opacity-50"
         }`}
         role="progressbar"
@@ -53,7 +53,7 @@ export default function QuotaBar({ quota, now }: Props) {
       </div>
 
       {(resetIn || spend) && (
-        <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px] text-neutral-600 dark:text-neutral-400">
+        <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px] text-stone-600 dark:text-stone-300">
           <span className="tnum truncate">{spend ?? ""}</span>
           <span className="tnum shrink-0">{resetIn ?? ""}</span>
         </div>

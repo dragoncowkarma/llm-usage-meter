@@ -24,12 +24,12 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
 
   if (s.status === "notInstalled") {
     return (
-      <div className="rounded-xl border border-neutral-200/60 bg-white/40 px-3 py-2.5 dark:border-neutral-700/40 dark:bg-neutral-800/25">
+      <div className="rounded-xl border border-stone-200/60 bg-white/40 px-3 py-2.5 dark:border-stone-700/40 dark:bg-stone-900/45">
         <div className="flex items-center justify-between">
-          <span className="text-[14px] font-medium text-neutral-400 dark:text-neutral-500">
+          <span className="text-[14px] font-medium text-stone-400 dark:text-stone-400">
             {s.displayName}
           </span>
-          <span className="text-[12px] text-neutral-400 dark:text-neutral-500">
+          <span className="text-[12px] text-stone-400 dark:text-stone-400">
             not installed
           </span>
         </div>
@@ -41,14 +41,14 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
     s.models.length > 0 || s.notes.length > 0 || s.sources.length > 0 || s.activity !== null;
 
   return (
-    <div className="rounded-xl border border-neutral-200/70 bg-white/70 shadow-sm dark:border-neutral-700/50 dark:bg-neutral-800/45">
+    <div className="rounded-xl border border-stone-200/70 bg-white/70 shadow-sm dark:border-stone-700/50 dark:bg-stone-900/70">
       <div className="px-3 pt-2.5 pb-2">
         <div className="flex items-center gap-2">
-          <span className="truncate text-[14px] font-semibold text-neutral-800 dark:text-neutral-100">
+          <span className="truncate text-[14px] font-semibold text-stone-800 dark:text-stone-100">
             {s.displayName}
           </span>
           {plan && (
-            <span className="shrink-0 rounded-md bg-neutral-500/10 px-1.5 py-px text-[11px] font-medium text-neutral-700 dark:text-neutral-300">
+            <span className="shrink-0 rounded-md bg-stone-500/10 px-1.5 py-px text-[11px] font-medium text-stone-700 dark:text-stone-200">
               {plan}
             </span>
           )}
@@ -77,13 +77,13 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
 
         {s.quotas.length === 0 && s.status !== "error" && (
           <div>
-            <p className="mt-2 text-[12px] text-neutral-500 dark:text-neutral-400">
+            <p className="mt-2 text-[12px] text-stone-500 dark:text-stone-300">
               No quota reported locally.
             </p>
             {s.activity && (
-              <p className="mt-1 tnum text-[12px] font-medium text-neutral-700 dark:text-neutral-300">
+              <p className="mt-1 tnum text-[12px] font-medium text-stone-700 dark:text-stone-200">
                 {s.activity.requestsToday.toLocaleString()} requests today
-                <span className="mx-1 text-neutral-400">·</span>
+                <span className="mx-1 text-stone-400">·</span>
                 {s.activity.requestsTotal.toLocaleString()} in window
               </p>
             )}
@@ -91,9 +91,9 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
         )}
 
         {(s.tokens || s.cost) && (
-          <div className="mt-2.5 flex items-baseline gap-3 border-t border-neutral-200/60 pt-2 text-[12px] dark:border-neutral-700/40">
+          <div className="mt-2.5 flex items-baseline gap-3 border-t border-stone-200/60 pt-2 text-[12px] dark:border-stone-700/40">
             {s.tokens && (
-              <span className="tnum text-neutral-600 dark:text-neutral-400">
+              <span className="tnum text-stone-600 dark:text-stone-300">
                 {formatTokens(
                   s.tokens.input + s.tokens.output + s.tokens.cacheWrite + s.tokens.cacheRead,
                 )}{" "}
@@ -102,7 +102,7 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
             )}
             {s.cost && (
               <span
-                className="tnum ml-auto font-semibold text-neutral-800 dark:text-neutral-100"
+                className="tnum ml-auto font-semibold text-stone-800 dark:text-stone-100"
                 title={s.cost.basis}
               >
                 {s.cost.partial ? "~" : ""}
@@ -118,7 +118,7 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="flex w-full items-center justify-center gap-1 rounded-b-xl border-t border-neutral-200/50 py-1.5 text-[11px] font-medium text-neutral-600 transition-colors hover:bg-neutral-500/5 dark:border-neutral-700/40 dark:text-neutral-400"
+            className="flex w-full items-center justify-center gap-1 rounded-b-xl border-t border-stone-200/50 py-1.5 text-[11px] font-medium text-stone-600 transition-colors hover:bg-stone-500/5 dark:border-stone-700/40 dark:text-stone-300"
             aria-expanded={open}
           >
             {open ? "Hide details" : "Details"}
@@ -128,9 +128,9 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
           </button>
 
           {open && (
-            <div className="space-y-2.5 border-t border-neutral-200/50 px-3 py-2.5 text-[12px] dark:border-neutral-700/40">
+            <div className="space-y-2.5 border-t border-stone-200/50 px-3 py-2.5 text-[12px] dark:border-stone-700/40">
               {s.activity && (
-                <div className="tnum flex flex-wrap gap-x-3 gap-y-1 text-neutral-600 dark:text-neutral-300">
+                <div className="tnum flex flex-wrap gap-x-3 gap-y-1 text-stone-600 dark:text-stone-200">
                   <span>{s.activity.requestsToday.toLocaleString()} today</span>
                   <span>{s.activity.requestsTotal.toLocaleString()} in window</span>
                   {s.activity.rateLimitHits > 0 && (
@@ -138,7 +138,7 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
                       {s.activity.rateLimitHits} rate-limited
                     </span>
                   )}
-                  <span className="ml-auto text-neutral-500 dark:text-neutral-400">
+                  <span className="ml-auto text-stone-500 dark:text-stone-300">
                     last {formatAgo(s.activity.lastActivityAt, now)}
                   </span>
                 </div>
@@ -148,7 +148,7 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
                 <table className="w-full text-left">
                   <tbody>
                     {s.models.slice(0, 6).map((m) => (
-                      <tr key={m.model} className="text-neutral-600 dark:text-neutral-300">
+                      <tr key={m.model} className="text-stone-600 dark:text-stone-200">
                         <td className="max-w-[150px] truncate py-0.5 pr-2">{m.model}</td>
                         <td className="tnum py-0.5 pr-2 text-right">
                           {formatTokens(
@@ -158,7 +158,7 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
                               m.tokens.cacheRead,
                           )}
                         </td>
-                        <td className="tnum py-0.5 text-right font-medium text-neutral-800 dark:text-neutral-100">
+                        <td className="tnum py-0.5 text-right font-medium text-stone-800 dark:text-stone-100">
                           {m.costUsd !== null ? `$${m.costUsd.toFixed(2)}` : "—"}
                         </td>
                       </tr>
@@ -168,7 +168,7 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
               )}
 
               {s.notes.map((note, i) => (
-                <p key={i} className="leading-relaxed text-neutral-600 dark:text-neutral-400">
+                <p key={i} className="leading-relaxed text-stone-600 dark:text-stone-300">
                   {note}
                 </p>
               ))}
@@ -178,7 +178,7 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
                   key={i}
                   type="button"
                   onClick={() => void invoke("reveal_source", { path: src.path })}
-                  className="flex w-full items-center gap-1.5 truncate text-left text-[11px] text-neutral-500 transition-colors hover:text-sky-600 dark:text-neutral-500 dark:hover:text-sky-400"
+                  className="flex w-full items-center gap-1.5 truncate text-left text-[11px] text-stone-500 transition-colors hover:text-orange-600 dark:text-stone-400 dark:hover:text-orange-400"
                   title={src.path}
                 >
                   <FolderIcon className="h-3 w-3 shrink-0" />
@@ -188,7 +188,7 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
                 </button>
               ))}
 
-              <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
+              <p className="text-[11px] text-stone-400 dark:text-stone-400">
                 Collected in {s.collectMs} ms
               </p>
             </div>
