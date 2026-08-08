@@ -28,7 +28,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-black/10 bg-neutral-50/85 backdrop-blur-2xl dark:border-white/10 dark:bg-neutral-900/85">
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-black/10 bg-stone-50/90 backdrop-blur-2xl dark:border-white/10 dark:bg-stone-950/92">
       <Header
         peakPercent={report?.peakPercent ?? null}
         loading={loading}
@@ -53,7 +53,7 @@ export default function App() {
         )}
 
         {!report && !error && (
-          <p className="py-8 text-center text-[12px] text-neutral-500 dark:text-neutral-400">
+          <p className="py-8 text-center text-[12px] text-stone-500 dark:text-stone-300">
             Reading local usage…
           </p>
         )}
@@ -63,14 +63,14 @@ export default function App() {
         ))}
 
         {report?.snapshots.length === 0 && (
-          <p className="py-8 text-center text-[12px] text-neutral-500 dark:text-neutral-400">
+          <p className="py-8 text-center text-[12px] text-stone-500 dark:text-stone-300">
             Every tool is switched off in settings.
           </p>
         )}
       </main>
 
-      <footer className="flex items-center gap-2 border-t border-neutral-200/60 px-3 py-1.5 dark:border-neutral-700/50">
-        <span className="tnum truncate text-[11px] text-neutral-500 dark:text-neutral-400">
+      <footer className="flex items-center gap-2 border-t border-stone-200/60 px-3 py-1.5 dark:border-stone-700/50">
+        <span className="tnum truncate text-[11px] text-stone-500 dark:text-stone-300">
           {report ? `updated ${formatAgo(report.generatedAt, now)}` : "…"}
           {report && ` · v${report.appVersion}`}
         </span>
@@ -79,7 +79,7 @@ export default function App() {
           onClick={() => void invoke("quit_app")}
           aria-label="Quit"
           title="Quit"
-          className="ml-auto rounded-lg p-1 text-neutral-500 transition-colors hover:bg-rose-500/10 hover:text-rose-600 dark:text-neutral-400 dark:hover:text-rose-400"
+          className="ml-auto rounded-lg p-1 text-stone-500 transition-colors hover:bg-rose-500/10 hover:text-rose-600 dark:text-stone-300 dark:hover:text-rose-400"
         >
           <PowerIcon className="h-3.5 w-3.5" />
         </button>

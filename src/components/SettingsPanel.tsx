@@ -34,11 +34,11 @@ function SegmentedControl<T extends number>({
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="text-[12px] text-neutral-700 dark:text-neutral-300">{label}</span>
+      <span className="text-[12px] text-stone-700 dark:text-stone-200">{label}</span>
       <div
         role="radiogroup"
         aria-label={label}
-        className="flex overflow-hidden rounded-lg border border-neutral-300/70 dark:border-neutral-600/60"
+        className="flex overflow-hidden rounded-lg border border-stone-300/70 dark:border-stone-600/60"
       >
         {choices.map((c) => (
           <button
@@ -49,8 +49,8 @@ function SegmentedControl<T extends number>({
             onClick={() => onSelect(c.value)}
             className={`px-2 py-1 text-[11px] transition-colors ${
               value === c.value
-                ? "bg-sky-500 text-white"
-                : "text-neutral-600 hover:bg-neutral-500/10 dark:text-neutral-300"
+                ? "bg-orange-500 text-white"
+                : "text-stone-600 hover:bg-stone-500/10 dark:text-stone-200"
             }`}
           >
             {c.label}
@@ -70,7 +70,7 @@ export default function SettingsPanel({ settings, providers, onChange }: Props) 
   };
 
   return (
-    <div className="space-y-3 border-b border-neutral-200/60 bg-neutral-500/[0.04] px-3 py-3 dark:border-neutral-700/50">
+    <div className="space-y-3 border-b border-stone-200/60 bg-stone-500/[0.04] px-3 py-3 dark:border-stone-700/50">
       <SegmentedControl
         label="Auto-refresh"
         value={settings.refreshIntervalSecs}
@@ -86,31 +86,31 @@ export default function SettingsPanel({ settings, providers, onChange }: Props) 
       />
 
       <label className="flex cursor-pointer items-center justify-between gap-2">
-        <span className="text-[12px] text-neutral-700 dark:text-neutral-300">
+        <span className="text-[12px] text-stone-700 dark:text-stone-200">
           Show % in menu bar
         </span>
         <input
           type="checkbox"
           checked={settings.showPercentInMenuBar}
           onChange={(e) => onChange({ ...settings, showPercentInMenuBar: e.target.checked })}
-          className="h-3.5 w-3.5 accent-sky-500"
+          className="h-3.5 w-3.5 accent-orange-500"
         />
       </label>
 
-      <div className="space-y-1.5 border-t border-neutral-200/60 pt-2 dark:border-neutral-700/40">
-        <span className="text-[11px] font-medium tracking-wide text-neutral-500 uppercase dark:text-neutral-400">
+      <div className="space-y-1.5 border-t border-stone-200/60 pt-2 dark:border-stone-700/40">
+        <span className="text-[11px] font-medium tracking-wide text-stone-500 uppercase dark:text-stone-300">
           Tools
         </span>
         {providers.map((p) => (
           <label key={p.id} className="flex cursor-pointer items-center justify-between gap-2">
-            <span className="truncate text-[12px] text-neutral-700 dark:text-neutral-300">
+            <span className="truncate text-[12px] text-stone-700 dark:text-stone-200">
               {p.displayName}
             </span>
             <input
               type="checkbox"
               checked={!settings.disabledProviders.includes(p.id)}
               onChange={(e) => toggleProvider(p.id, e.target.checked)}
-              className="h-3.5 w-3.5 accent-sky-500"
+              className="h-3.5 w-3.5 accent-orange-500"
             />
           </label>
         ))}
