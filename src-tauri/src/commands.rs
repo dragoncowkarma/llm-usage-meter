@@ -44,8 +44,21 @@ pub fn save_settings(state: State<'_, AppState>, settings: Settings) -> Settings
 
 /// Reveal one of the source files a snapshot cites, so the user can check our
 /// arithmetic against the raw data.
+///
+/// `path` must exactly match a `SourceRef.path` from the most recent report.
+/// This is the one command that reaches outside the app's own state to open
+/// something in Finder, so it validates server-side rather than trusting
+/// whatever the webview sends — the frontend only ever passes back a path we
+/// gave it, but the guarantee needs to live here, not in frontend discipline.
 #[tauri::command]
-pub fn reveal_source(app: AppHandle, path: String) -> Result<(), String> {
+pub fn reveal_source(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    if !state.is_known_source_path(&path) {
+        return Err("not a known source path".into());
+    }
     use tauri_plugin_opener::OpenerExt;
     app.opener()
         .reveal_item_in_dir(&path)

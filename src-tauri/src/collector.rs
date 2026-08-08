@@ -124,6 +124,28 @@ impl AppState {
         self.cache.lock().expect("cache mutex").clone()
     }
 
+    /// True when `path` exactly matches a `SourceRef.path` this app itself
+    /// put in the most recently collected report.
+    ///
+    /// `reveal_source` is the one IPC command that reaches outside the app's
+    /// own state to open something in Finder, so it must not simply trust
+    /// whatever string the webview sends — that would let any future bug that
+    /// lets untrusted content run in the webview reveal an arbitrary path on
+    /// disk. Checking against the report is the narrowest correct rule: it is
+    /// exactly the set of paths this app has already told the user about.
+    pub fn is_known_source_path(&self, path: &str) -> bool {
+        self.cache
+            .lock()
+            .expect("cache mutex")
+            .as_ref()
+            .is_some_and(|report| {
+                report
+                    .snapshots
+                    .iter()
+                    .any(|s| s.sources.iter().any(|src| src.path == path))
+            })
+    }
+
     /// Run every enabled provider and replace the cache.
     pub fn refresh(&self) -> UsageReport {
         let settings = self.settings();
@@ -373,6 +395,64 @@ mod tests {
         println!("\n---BEGIN JSON---");
         println!("{}", serde_json::to_string(&report).unwrap());
         println!("---END JSON---\n");
+    }
+
+    #[test]
+    fn unknown_source_path_is_rejected_before_any_refresh() {
+        // Before the first collection, nothing is "known" — reveal_source
+        // must fail closed, not open, when the cache is empty.
+        let state = AppState::new();
+        assert!(!state.is_known_source_path("/etc/passwd"));
+        assert!(!state.is_known_source_path(""));
+    }
+
+    #[test]
+    fn only_paths_the_report_actually_cited_are_known() {
+        struct WithSource;
+        impl UsageProvider for WithSource {
+            fn id(&self) -> &'static str {
+                "withsource"
+            }
+            fn display_name(&self) -> &'static str {
+                "WithSource"
+            }
+            fn detect(&self, _: &ProviderContext) -> Detection {
+                Detection::Installed { root: "/".into() }
+            }
+            fn collect(&self, ctx: &ProviderContext) -> crate::error::Result<UsageSnapshot> {
+                let mut snap = UsageSnapshot::empty(self.id(), self.display_name(), ProviderStatus::Ok);
+                snap.sources.push(crate::model::SourceRef {
+                    kind: "test".into(),
+                    path: "/known/path".into(),
+                    observed_at: Some(ctx.now),
+                });
+                Ok(snap)
+            }
+        }
+
+        let env = HostEnv::detect();
+        let prices = PriceTable::builtin();
+        let ctx = test_ctx(&env, &prices);
+        let snap = collect_one(&WithSource, &ctx);
+
+        let state = AppState::new();
+        *state.cache.lock().unwrap() = Some(UsageReport {
+            snapshots: vec![snap],
+            generated_at: ctx.now,
+            platform: "test".into(),
+            peak_percent: None,
+            app_version: "0.0.0".into(),
+        });
+
+        assert!(state.is_known_source_path("/known/path"));
+        // Not the exact string the report cited — must not match by prefix,
+        // substring, or any other loose rule. An attacker-chosen path that
+        // merely starts with a known directory is exactly the case this
+        // check exists to block.
+        assert!(!state.is_known_source_path("/known/path/../../etc/passwd"));
+        assert!(!state.is_known_source_path("/known/path/extra"));
+        assert!(!state.is_known_source_path("/completely/different"));
+        assert!(!state.is_known_source_path(""));
     }
 
     #[test]
