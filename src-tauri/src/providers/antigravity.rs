@@ -1,25 +1,25 @@
 //! Antigravity (Gemini).
 //!
-//! **This provider reports an activity proxy, not billed usage — deliberately.**
+//! This provider first attempts to get authoritative quota data by running
+//! `agy -p "/usage"`, which queries the server and returns tab-separated rows:
 //!
-//! Unlike Claude Code and Codex, Antigravity keeps no local token ledger and no
-//! local quota cache. Its conversation store is SQLite whose payloads are
-//! protobuf blobs carrying timestamps and session ids but no token counts, and
-//! its quota manager (`quota_manager.go`) refreshes from the server at runtime
-//! without persisting the result. Inventing a token number here would be a
-//! guess dressed up as a measurement, so instead we report what the filesystem
-//! genuinely knows:
+//! ```text
+//! Gemini Models  Weekly Limit Remaining   66%  2026-08-12T09:40:25Z
+//! Gemini Models  Five Hour Limit Remaining 89%  2026-08-08T07:20:03Z
+//! ...
+//! ```
 //!
-//! * **Steps and conversations** from `cache/conversation_metadata.json`, which
-//!   records `NumSteps` and `UpdatedAt` per conversation — a real request-volume
-//!   proxy.
-//! * **Observed quota exhaustion** from `RESOURCE_EXHAUSTED (code 429)` lines in
-//!   the CLI logs, which is the one hard quota signal available locally.
+//! When that succeeds, quotas are reported as `Confidence::Authoritative`.
+//! When the binary is absent or the call fails, it falls back to:
 //!
-//! Snapshots are marked `Confidence::Heuristic` so the UI can say so plainly.
+//! * **Steps and conversations** from `cache/conversation_metadata.json` —
+//!   a request-volume proxy, reported as `Confidence::Heuristic`.
+//! * **Observed quota exhaustion** from `RESOURCE_EXHAUSTED (code 429)` lines
+//!   in the CLI logs.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::Deserialize;
 use walkdir::WalkDir;
@@ -65,6 +65,7 @@ fn candidate_roots(ctx: &ProviderContext) -> Vec<PathBuf> {
     vec![
         gemini.join("antigravity-cli"),
         gemini.join("antigravity"),
+        gemini.join("antigravity-ide"),
         p.dot_dir("antigravity"),
         // Windows/macOS app-data locations for the desktop build.
         p.data_root().join("Antigravity"),
@@ -102,6 +103,19 @@ impl UsageProvider for AntigravityProvider {
             return Ok(snap);
         }
 
+        // --- Live quota via `agy -p "/usage"` -----------------------------------
+        // This is the only way to get real quota percentages: Antigravity's quota
+        // manager never persists the result to disk, so we ask the CLI directly.
+        // A 10-second timeout prevents a stalled binary from blocking the refresh.
+        let live = fetch_live_quotas(&ctx.env.paths.home());
+        if !live.is_empty() {
+            snap.confidence = Confidence::Authoritative;
+            for q in live {
+                snap.quotas.push(q);
+            }
+        }
+        // -----------------------------------------------------------------------
+
         let cutoff = ctx.now - (ctx.lookback_days as i64) * 86_400;
         let day_start = util::local_day_start(ctx.now);
 
@@ -137,13 +151,15 @@ impl UsageProvider for AntigravityProvider {
         }
 
         // The one genuine quota signal available locally: the backend told
-        // Antigravity "no" recently. Reported only while it is still fresh, and
-        // labelled as an observation rather than a quota reading.
+        // Antigravity "no" recently. Reported only while it is still fresh.
         if let Some(at) = exhaustion {
             if ctx.now - at <= EXHAUSTION_FRESH_SECS {
-                let mut q = QuotaWindow::new("observed_exhaustion", "Quota exhausted (observed)", 100.0);
-                q.severity = Severity::Critical;
-                snap.quotas.push(q);
+                // Only add the 429 quota card if live data didn't already give us one.
+                if snap.quotas.is_empty() {
+                    let mut q = QuotaWindow::new("observed_exhaustion", "Quota exhausted (observed)", 100.0);
+                    q.severity = Severity::Critical;
+                    snap.quotas.push(q);
+                }
                 snap.notes.push(
                     "Antigravity was refused with HTTP 429 in the last 15 minutes.".into(),
                 );
@@ -163,9 +179,6 @@ impl UsageProvider for AntigravityProvider {
             ));
         }
 
-        // Never let the one hard quota signal this provider has go silently
-        // to zero because the CLI changed its log format underneath us — say
-        // so, rather than reporting a clean 0 that looks like "no rejections".
         if marker_possibly_stale {
             snap.notes.push(
                 "Some log lines look like quota rejections but didn't match this build's \
@@ -175,12 +188,14 @@ impl UsageProvider for AntigravityProvider {
             );
         }
 
-        snap.notes.push(
-            "Antigravity stores no local token or quota ledger, so these are request counts, \
-             not billed usage. Token totals and cost are unavailable by design rather than \
-             estimated."
-                .into(),
-        );
+        if snap.confidence == Confidence::Heuristic {
+            snap.notes.push(
+                "Antigravity stores no local token or quota ledger, so these are request counts, \
+                 not billed usage. Token totals and cost are unavailable by design rather than \
+                 estimated."
+                    .into(),
+            );
+        }
         snap.activity = Some(activity);
 
         snap.collect_ms = util::now_millis().saturating_sub(started);
@@ -194,6 +209,118 @@ fn max_opt(a: Option<i64>, b: Option<i64>) -> Option<i64> {
         (x, None) => x,
         (None, y) => y,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Live quota via `agy -p "/usage"`
+// ---------------------------------------------------------------------------
+
+/// Candidate binary locations, newest convention first.
+fn agy_binary(home: &std::path::Path) -> Option<PathBuf> {
+    let candidates = [
+        home.join(".local").join("bin").join("agy"),
+        home.join(".gemini").join("antigravity-cli").join("bin").join("agy"),
+        home.join(".gemini").join("antigravity").join("bin").join("agy"),
+    ];
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+/// Run `agy -p "/usage"` with a 10-second timeout and parse the output into
+/// `QuotaWindow` entries.
+///
+/// Output format (tab-separated):
+/// ```text
+/// Gemini Models\tWeekly Limit Remaining\t66%\t2026-08-12T09:40:25Z
+/// ```
+///
+/// "Remaining" means how much is LEFT.
+fn fetch_live_quotas(home: &std::path::Path) -> Vec<QuotaWindow> {
+    let Some(binary) = agy_binary(home) else {
+        return vec![];
+    };
+
+    let mut child = match Command::new(&binary)
+        .args(["-p", "/usage"])
+        .env("HOME", home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    let stdout = child.stdout.take();
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut stream) = stdout {
+            use std::io::Read;
+            let _ = stream.read_to_end(&mut buf);
+        }
+        let _ = tx.send(buf);
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(bytes) => {
+            let status = child.wait();
+            if status.map_or(false, |s| s.success()) {
+                if let Ok(text) = String::from_utf8(bytes) {
+                    return parse_usage_output(&text);
+                }
+            }
+            vec![]
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            vec![]
+        }
+    }
+}
+
+fn parse_usage_output(text: &str) -> Vec<QuotaWindow> {
+    let mut quotas = Vec::new();
+
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        // Expected: model_group \t window_label \t pct \t resets_at
+        if parts.len() < 3 {
+            continue;
+        }
+        let model_group = parts[0].trim();
+        let window_label = parts[1].trim();
+        let pct_str = parts[2].trim().trim_end_matches('%');
+
+        let remaining: f64 = match pct_str.parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let remaining = remaining.clamp(0.0, 100.0);
+
+        let resets_at: Option<i64> = parts
+            .get(3)
+            .and_then(|s| util::parse_iso8601(s.trim()));
+
+        // Build a stable id like "gemini_models_weekly_limit_remaining"
+        let id = format!(
+            "{}_{}",
+            model_group.to_lowercase().replace(' ', "_"),
+            window_label.to_lowercase().replace(' ', "_")
+        );
+        let label = format!("{} — {}", model_group, window_label);
+
+        // Store the remaining% directly so the number matches what
+        // Google AI Studio shows. Severity is inverted: low remaining = danger.
+        let mut q = QuotaWindow::new(&id, &label, remaining);
+        q.resets_at = resets_at;
+        // Severity based on how little remains (not on the displayed value).
+        q.severity = Severity::from_percent(100.0 - remaining);
+        quotas.push(q);
+    }
+
+    quotas
 }
 
 // ---------------------------------------------------------------------------
@@ -267,22 +394,32 @@ fn read_activity(root: &Path, cutoff: i64, day_start: i64) -> ActivityRead {
         }
     }
 
-    // Fallback for layouts with no metadata cache: count conversation databases
-    // by mtime. Coarser — one unit per conversation, not per step — but real.
+    // Fallback for layouts with no metadata cache: count conversation files (.db / .pb)
+    // and brain transcripts by mtime.
     let conv_dir = root.join("conversations");
+    let brain_dir = root.join("brain");
     let mut out = ActivityRead {
         source_kind: "conversation-files".into(),
         source_path: conv_dir.display().to_string(),
         ..Default::default()
     };
+    let mut seen_ids = std::collections::HashSet::new();
+
     if conv_dir.is_dir() {
         for entry in WalkDir::new(&conv_dir)
             .max_depth(1)
             .into_iter()
             .filter_map(std::result::Result::ok)
             .filter(|e| e.file_type().is_file())
-            .filter(|e| e.path().extension().is_some_and(|x| x == "db"))
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .is_some_and(|x| x == "db" || x == "pb")
+            })
         {
+            if let Some(stem) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                seen_ids.insert(stem.to_string());
+            }
             let Some(mtime) = util::mtime_unix(entry.path()) else {
                 continue;
             };
@@ -298,6 +435,59 @@ fn read_activity(root: &Path, cutoff: i64, day_start: i64) -> ActivityRead {
             }
         }
     }
+
+    if brain_dir.is_dir() {
+        for entry in WalkDir::new(&brain_dir)
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .filter_map(std::result::Result::ok)
+            .filter(|e| e.file_type().is_dir())
+        {
+            let folder_name = entry.file_name().to_string_lossy();
+            if folder_name.starts_with('.') || folder_name == "tempmediaStorage" {
+                continue;
+            }
+            if seen_ids.contains(folder_name.as_ref()) {
+                continue;
+            }
+
+            // Use the transcript's mtime if present, otherwise the folder's mtime.
+            let transcript_path = entry
+                .path()
+                .join(".system_generated")
+                .join("logs")
+                .join("transcript.jsonl");
+
+            let target_path = if transcript_path.is_file() {
+                transcript_path
+            } else {
+                entry.path().to_path_buf()
+            };
+
+            let Some(mtime) = util::mtime_unix(&target_path) else {
+                continue;
+            };
+            if mtime < cutoff {
+                continue;
+            }
+
+            // Each conversation counts as 1 — JSONL lines are internal steps,
+            // not billable requests, so using line count would inflate the total.
+            if out.counted == 0 {
+                out.source_kind = "brain-transcripts".into();
+                out.source_path = brain_dir.display().to_string();
+            }
+            out.counted += 1;
+            out.steps += 1;
+            out.last_activity_at = max_opt(out.last_activity_at, Some(mtime));
+            if mtime >= day_start {
+                out.steps_today += 1;
+                out.conversations_today += 1;
+            }
+        }
+    }
+
     out
 }
 
@@ -498,5 +688,68 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn counts_pb_and_db_conversation_files() {
+        let root = temp_dir("pb-fallback");
+        let conv = root.join("conversations");
+        std::fs::create_dir_all(&conv).unwrap();
+        std::fs::write(conv.join("one.db"), b"x").unwrap();
+        std::fs::write(conv.join("two.pb"), b"x").unwrap();
+
+        let out = read_activity(&root, 0, i64::MAX);
+        assert_eq!(out.counted, 2, "both .db and .pb files count");
+        assert_eq!(out.source_kind, "conversation-files");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn scans_brain_transcripts_when_no_metadata_or_files() {
+        let root = temp_dir("brain");
+        let brain_conv = root
+            .join("brain")
+            .join("uuid-1234")
+            .join(".system_generated")
+            .join("logs");
+        std::fs::create_dir_all(&brain_conv).unwrap();
+        std::fs::write(
+            brain_conv.join("transcript.jsonl"),
+            "{\"step_index\":0}\n{\"step_index\":1}\n{\"step_index\":2}\n",
+        )
+        .unwrap();
+
+        let out = read_activity(&root, 0, i64::MAX);
+        assert_eq!(out.counted, 1);
+        assert_eq!(out.steps, 1, "each conversation counts as 1, not by JSONL line count");
+        assert_eq!(out.source_kind, "brain-transcripts");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn parses_agy_usage_output_into_quota_windows() {
+        let text = "Gemini Models\tWeekly Limit Remaining\t66%\t2026-08-12T09:40:25Z\n\
+                    Gemini Models\tFive Hour Limit Remaining\t89%\t2026-08-08T07:20:03Z\n\
+                    Claude and GPT models\tWeekly Limit Remaining\t42%\t2026-08-11T01:56:43Z\n";
+
+        let quotas = parse_usage_output(text);
+        assert_eq!(quotas.len(), 3);
+
+        // remaining stored as-is: 66% remaining → usedPercent = 66
+        assert!((quotas[0].used_percent - 66.0).abs() < 0.01);
+        // severity inverted: 34% used → Normal
+        assert_eq!(quotas[0].severity, Severity::Normal);
+
+        // 89% remaining → usedPercent = 89, severity inverted: 11% used → Normal
+        assert!((quotas[1].used_percent - 89.0).abs() < 0.01);
+        assert_eq!(quotas[1].severity, Severity::Normal);
+
+        // 42% remaining → usedPercent = 42, severity inverted: 58% used → Normal
+        assert!((quotas[2].used_percent - 42.0).abs() < 0.01);
+        assert_eq!(quotas[2].severity, Severity::Normal);
+
+        assert!(quotas[0].resets_at.is_some());
     }
 }

@@ -76,9 +76,18 @@ export default function ProviderCard({ snapshot: s, now }: Props) {
         )}
 
         {s.quotas.length === 0 && s.status !== "error" && (
-          <p className="mt-2 text-[12px] text-neutral-500 dark:text-neutral-400">
-            No quota reported locally.
-          </p>
+          <div>
+            <p className="mt-2 text-[12px] text-neutral-500 dark:text-neutral-400">
+              No quota reported locally.
+            </p>
+            {s.activity && (
+              <p className="mt-1 tnum text-[12px] font-medium text-neutral-700 dark:text-neutral-300">
+                {s.activity.requestsToday.toLocaleString()} requests today
+                <span className="mx-1 text-neutral-400">·</span>
+                {s.activity.requestsTotal.toLocaleString()} in window
+              </p>
+            )}
+          </div>
         )}
 
         {(s.tokens || s.cost) && (
