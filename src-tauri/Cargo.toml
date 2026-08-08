@@ -1,0 +1,34 @@
+[package]
+name = "llm-usage-meter"
+version = "0.1.0"
+description = "Menu bar meter for AI coding agent usage"
+authors = ["mgkwon"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "llm_usage_meter_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `macos-private-api` backs the transparent, vibrancy-style popover window;
+# it must be enabled here to match `macOSPrivateApi` in tauri.conf.json.
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+thiserror = "2"
+dirs = "6"
+walkdir = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+# Deliberately NOT panic = "abort": the collector catches a panicking provider
+# so one malformed transcript degrades a single card instead of killing the app.

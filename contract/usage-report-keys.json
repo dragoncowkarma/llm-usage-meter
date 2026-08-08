@@ -1,0 +1,51 @@
+{
+  "$comment": "Single source of truth for the IPC payload shape shared between src-tauri/src/model.rs + collector.rs and src/types/usage.ts. Each entry lists the exact, sorted, top-level JSON key set for one type — one level deep only, not recursive, so a nested type's own keys live under its own entry, not its parent's. Both a Rust test (src-tauri/src/lib.rs, mod schema_drift) and a TypeScript test (src/types/usage.contract.test.ts) assert their runtime shape against this file, so a rename/add/remove on either side that isn't mirrored here — and on the other language's type — fails that language's test suite. This catches field-name drift; it does not catch a field changing type while keeping its name.",
+  "Money": ["amountMinor", "currency", "exponent"],
+  "QuotaWindow": [
+    "id",
+    "isActive",
+    "label",
+    "limitAmount",
+    "resetsAt",
+    "severity",
+    "usedAmount",
+    "usedPercent",
+    "windowMinutes"
+  ],
+  "TokenTotals": ["cacheRead", "cacheWrite", "input", "output", "reasoning"],
+  "ModelUsage": ["costUsd", "model", "requests", "tokens"],
+  "CostEstimate": ["amount", "basis", "partial"],
+  "ActivityStats": [
+    "lastActivityAt",
+    "rateLimitHits",
+    "requestsToday",
+    "requestsTotal",
+    "sessionsToday"
+  ],
+  "SourceRef": ["kind", "observedAt", "path"],
+  "UsageSnapshot": [
+    "activity",
+    "collectMs",
+    "collectedAt",
+    "confidence",
+    "cost",
+    "displayName",
+    "error",
+    "models",
+    "notes",
+    "plan",
+    "providerId",
+    "quotas",
+    "sources",
+    "status",
+    "tokens"
+  ],
+  "UsageReport": ["appVersion", "generatedAt", "peakPercent", "platform", "snapshots"],
+  "ProviderInfo": ["displayName", "id"],
+  "Settings": [
+    "disabledProviders",
+    "lookbackDays",
+    "refreshIntervalSecs",
+    "showPercentInMenuBar"
+  ]
+}

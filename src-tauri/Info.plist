@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated Info.plist by the Tauri macOS bundler.
+
+  LSUIElement declares this an agent app: no Dock tile, no menu bar of its own,
+  no entry in the ⌘-Tab switcher. The code also calls
+  `ActivationPolicy::Accessory` at startup, but that runs *after* launch — so
+  without this key the Dock briefly shows an icon before it is hidden again.
+  Declaring it here means the Dock tile is never created in the first place.
+-->
+<plist version="1.0">
+  <dict>
+    <key>LSUIElement</key>
+    <true/>
+  </dict>
+</plist>
