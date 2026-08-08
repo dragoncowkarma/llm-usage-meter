@@ -221,12 +221,11 @@ fn agy_binary(home: &std::path::Path) -> Option<PathBuf> {
         home.join(".local").join("bin").join("agy"),
         home.join(".gemini").join("antigravity-cli").join("bin").join("agy"),
         home.join(".gemini").join("antigravity").join("bin").join("agy"),
-        PathBuf::from("/usr/local/bin/agy"),
     ];
     candidates.into_iter().find(|p| p.is_file())
 }
 
-/// Run `agy -p "/usage"` with a short timeout and parse the output into
+/// Run `agy -p "/usage"` with a 10-second timeout and parse the output into
 /// `QuotaWindow` entries.
 ///
 /// Output format (tab-separated):
@@ -234,28 +233,51 @@ fn agy_binary(home: &std::path::Path) -> Option<PathBuf> {
 /// Gemini Models\tWeekly Limit Remaining\t66%\t2026-08-12T09:40:25Z
 /// ```
 ///
-/// "Remaining" means how much is LEFT, so `used_percent = 100 - remaining`.
+/// "Remaining" means how much is LEFT.
 fn fetch_live_quotas(home: &std::path::Path) -> Vec<QuotaWindow> {
     let Some(binary) = agy_binary(home) else {
         return vec![];
     };
 
-    let output = Command::new(&binary)
+    let mut child = match Command::new(&binary)
         .args(["-p", "/usage"])
         .env("HOME", home)
-        .output();
-
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => return vec![],
-    };
-
-    let text = match String::from_utf8(output.stdout) {
-        Ok(s) => s,
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
         Err(_) => return vec![],
     };
 
-    parse_usage_output(&text)
+    let stdout = child.stdout.take();
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut stream) = stdout {
+            use std::io::Read;
+            let _ = stream.read_to_end(&mut buf);
+        }
+        let _ = tx.send(buf);
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(bytes) => {
+            let status = child.wait();
+            if status.map_or(false, |s| s.success()) {
+                if let Ok(text) = String::from_utf8(bytes) {
+                    return parse_usage_output(&text);
+                }
+            }
+            vec![]
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            vec![]
+        }
+    }
 }
 
 fn parse_usage_output(text: &str) -> Vec<QuotaWindow> {
