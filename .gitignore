@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+src-tauri/target
+src-tauri/gen/schemas
+
+.DS_Store
+# AppleDouble sidecars, created when a macOS host writes to a FAT/exFAT volume
+._*
+.vscode/*
+!.vscode/extensions.json
+*.log
