@@ -106,12 +106,26 @@ impl UsageProvider for AntigravityProvider {
         // --- Live quota via `agy -p "/usage"` -----------------------------------
         // This is the only way to get real quota percentages: Antigravity's quota
         // manager never persists the result to disk, so we ask the CLI directly.
-        // A 10-second timeout prevents a stalled binary from blocking the refresh.
-        let live = fetch_live_quotas(&ctx.env.paths.home());
-        if !live.is_empty() {
-            snap.confidence = Confidence::Authoritative;
-            for q in live {
-                snap.quotas.push(q);
+        match fetch_live_quotas(&ctx.env.paths.home()) {
+            LiveQuotaFetch::Ok(live) if !live.is_empty() => {
+                snap.confidence = Confidence::Authoritative;
+                for q in live {
+                    snap.quotas.push(q);
+                }
+            }
+            // Binary ran fine but produced nothing we could parse — fall
+            // through to the heuristic path below, silently, same as before.
+            LiveQuotaFetch::Ok(_) | LiveQuotaFetch::NoBinary => {}
+            // The binary exists but this call didn't come back with usable
+            // output. Previously this failed silently, which — since it's a
+            // per-refresh call — made the quota bars flicker in and out on
+            // every ordinary hiccup (a slow poll, a slightly loaded system)
+            // with zero indication why. Surface the reason instead.
+            LiveQuotaFetch::Failed(reason) => {
+                snap.notes.push(format!(
+                    "Live quota check via `agy` didn't come back this refresh ({reason}); \
+                     showing activity heuristics instead."
+                ));
             }
         }
         // -----------------------------------------------------------------------
@@ -225,7 +239,29 @@ fn agy_binary(home: &std::path::Path) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
-/// Run `agy -p "/usage"` with a 10-second timeout and parse the output into
+/// Observed wall-clock cost of a real `agy -p "/usage"` call (it round-trips
+/// to Google's servers) is ~8-9s, which left the old 10s timeout only a
+/// second or two of margin — enough for an ordinary hiccup (system load, a
+/// slow network) to trip it on essentially every other refresh. Widened to
+/// give real headroom instead of a coin flip.
+const AGY_TIMEOUT_SECS: u64 = 25;
+
+/// Outcome of one `agy -p "/usage"` attempt.
+enum LiveQuotaFetch {
+    /// No `agy` binary found. Expected on IDE-only installs without the CLI;
+    /// not worth alarming the user about.
+    NoBinary,
+    /// The call completed; these are the quota rows we could parse (may be
+    /// empty if the output had none we recognized).
+    Ok(Vec<QuotaWindow>),
+    /// The binary exists but this call didn't produce usable output — e.g. it
+    /// timed out, exited non-zero, or printed something we couldn't decode.
+    /// Carries a human-readable reason so the caller can tell the user *why*
+    /// live quota is missing this cycle instead of just going silent.
+    Failed(String),
+}
+
+/// Run `agy -p "/usage"` with a timeout and parse the output into
 /// `QuotaWindow` entries.
 ///
 /// Output format (tab-separated):
@@ -234,9 +270,9 @@ fn agy_binary(home: &std::path::Path) -> Option<PathBuf> {
 /// ```
 ///
 /// "Remaining" means how much is LEFT.
-fn fetch_live_quotas(home: &std::path::Path) -> Vec<QuotaWindow> {
+fn fetch_live_quotas(home: &std::path::Path) -> LiveQuotaFetch {
     let Some(binary) = agy_binary(home) else {
-        return vec![];
+        return LiveQuotaFetch::NoBinary;
     };
 
     let mut child = match Command::new(&binary)
@@ -247,7 +283,7 @@ fn fetch_live_quotas(home: &std::path::Path) -> Vec<QuotaWindow> {
         .spawn()
     {
         Ok(c) => c,
-        Err(_) => return vec![],
+        Err(e) => return LiveQuotaFetch::Failed(format!("couldn't start `agy`: {e}")),
     };
 
     let stdout = child.stdout.take();
@@ -262,20 +298,22 @@ fn fetch_live_quotas(home: &std::path::Path) -> Vec<QuotaWindow> {
         let _ = tx.send(buf);
     });
 
-    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+    match rx.recv_timeout(std::time::Duration::from_secs(AGY_TIMEOUT_SECS)) {
         Ok(bytes) => {
             let status = child.wait();
-            if status.map_or(false, |s| s.success()) {
-                if let Ok(text) = String::from_utf8(bytes) {
-                    return parse_usage_output(&text);
-                }
+            match status {
+                Ok(s) if s.success() => match String::from_utf8(bytes) {
+                    Ok(text) => LiveQuotaFetch::Ok(parse_usage_output(&text)),
+                    Err(_) => LiveQuotaFetch::Failed("`agy` printed non-UTF-8 output".into()),
+                },
+                Ok(s) => LiveQuotaFetch::Failed(format!("`agy` exited with {s}")),
+                Err(e) => LiveQuotaFetch::Failed(format!("couldn't wait on `agy`: {e}")),
             }
-            vec![]
         }
         Err(_) => {
             let _ = child.kill();
             let _ = child.wait();
-            vec![]
+            LiveQuotaFetch::Failed(format!("`agy` didn't respond within {AGY_TIMEOUT_SECS}s"))
         }
     }
 }
