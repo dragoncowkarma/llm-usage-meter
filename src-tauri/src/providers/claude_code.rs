@@ -2,10 +2,15 @@
 //!
 //! Two independent sources, deliberately kept separate in the snapshot:
 //!
-//! * **Quota (authoritative)** — `~/.claude.json → cachedUsageUtilization`.
-//!   Claude Code caches what the Anthropic backend reports for the 5-hour and
-//!   weekly windows, plus extra-usage credit spend. This is the same data
-//!   `/usage` prints, so we render it rather than re-deriving it.
+//! * **Quota (authoritative, live)** — `claude --output-format json -p /usage`.
+//!   This subprocess call asks the Anthropic backend for the current 5-hour and
+//!   weekly window usage, exactly what the Claude Code desktop app shows.
+//!   On failure it falls back to the on-disk cache below.
+//!
+//! * **Quota (authoritative, cached fallback)** — `~/.claude.json →
+//!   cachedUsageUtilization`. Claude Code writes a snapshot of the backend's
+//!   quota data whenever it runs on this machine. Used when the live call fails
+//!   (binary absent, no network, timeout).
 //!
 //! * **Tokens and cost (derived)** — `~/.claude/projects/**/*.jsonl`. Every
 //!   assistant turn carries a full `message.usage` object. Summing it gives an
@@ -15,6 +20,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -66,38 +72,91 @@ impl UsageProvider for ClaudeCodeProvider {
         let started = util::now_millis();
         let mut snap = UsageSnapshot::empty(self.id(), self.display_name(), ProviderStatus::Ok);
 
-        // ---- Quota: authoritative, from the CLI's own cache ------------------
+        // ---- Quota: live, from claude --output-format json -p /usage ---------
         let config_path = Self::config_path(ctx);
-        match read_config(&config_path) {
-            Ok(cfg) => {
-                snap.plan = cfg.plan;
-                if let Some(util_block) = cfg.utilization {
-                    snap.quotas = quota_windows(&util_block);
-                    snap.confidence = Confidence::Authoritative;
-                    if let Some(age) = util_block.age_seconds(ctx.now) {
-                        snap.sources.push(SourceRef {
-                            kind: "quota-cache".into(),
-                            path: config_path.display().to_string(),
-                            observed_at: Some(ctx.now - age),
-                        });
-                        // The cache only refreshes while Claude Code runs, so a
-                        // stale number is common and must be labelled, never
-                        // presented as live.
-                        if age > 1800 {
-                            snap.notes.push(format!(
-                                "Quota figures cached {} ago — open Claude Code to refresh.",
-                                humanise_age(age)
-                            ));
-                        }
-                    }
-                } else {
-                    snap.notes
-                        .push("No cached quota yet — run Claude Code once to populate it.".into());
+        let live_fetch = fetch_live_quotas(&ctx.env.paths.home());
+        match live_fetch {
+            LiveQuotaFetch::Ok(live) if !live.is_empty() => {
+                snap.confidence = Confidence::Authoritative;
+                snap.quotas = live;
+                snap.sources.push(SourceRef {
+                    kind: "live-quota".into(),
+                    path: "claude --output-format json -p /usage".into(),
+                    observed_at: Some(ctx.now),
+                });
+                // Plan still comes from the on-disk config (live output doesn't
+                // include it in a machine-readable way).
+                if let Ok(cfg) = read_config(&config_path) {
+                    snap.plan = cfg.plan;
                 }
             }
-            Err(e) => {
-                snap.status = ProviderStatus::Degraded;
-                snap.notes.push(format!("Could not read ~/.claude.json: {e}"));
+            // Binary absent or output empty — fall back to the on-disk cache.
+            LiveQuotaFetch::NoBinary | LiveQuotaFetch::Ok(_) => {
+                match read_config(&config_path) {
+                    Ok(cfg) => {
+                        snap.plan = cfg.plan;
+                        if let Some(util_block) = cfg.utilization {
+                            snap.quotas = quota_windows(&util_block);
+                            snap.confidence = Confidence::Authoritative;
+                            if let Some(age) = util_block.age_seconds(ctx.now) {
+                                snap.sources.push(SourceRef {
+                                    kind: "quota-cache".into(),
+                                    path: config_path.display().to_string(),
+                                    observed_at: Some(ctx.now - age),
+                                });
+                                if age > 1800 {
+                                    snap.notes.push(format!(
+                                        "Quota figures cached {} ago — open Claude Code to refresh.",
+                                        humanise_age(age)
+                                    ));
+                                }
+                            }
+                        } else {
+                            snap.notes.push(
+                                "No cached quota yet — run Claude Code once to populate it."
+                                    .into(),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        snap.status = ProviderStatus::Degraded;
+                        snap.notes.push(format!("Could not read ~/.claude.json: {e}"));
+                    }
+                }
+            }
+            // Binary exists but the call failed — surface the reason and fall
+            // back to the cache so the UI never goes blank silently.
+            LiveQuotaFetch::Failed(reason) => {
+                snap.notes.push(format!(
+                    "Live quota check via `claude` didn't come back this refresh ({reason}); \
+                     showing cached figures instead."
+                ));
+                match read_config(&config_path) {
+                    Ok(cfg) => {
+                        snap.plan = cfg.plan;
+                        if let Some(util_block) = cfg.utilization {
+                            snap.quotas = quota_windows(&util_block);
+                            snap.confidence = Confidence::Authoritative;
+                            if let Some(age) = util_block.age_seconds(ctx.now) {
+                                snap.sources.push(SourceRef {
+                                    kind: "quota-cache".into(),
+                                    path: config_path.display().to_string(),
+                                    observed_at: Some(ctx.now - age),
+                                });
+                                if age > 1800 {
+                                    snap.notes.push(format!(
+                                        "Quota figures cached {} ago — open Claude Code to refresh.",
+                                        humanise_age(age)
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        snap.status = ProviderStatus::Degraded;
+                        snap.notes.push(format!("Could not read ~/.claude.json: {e}"));
+                    }
+                }
             }
         }
 
@@ -325,6 +384,177 @@ fn severity_from(tag: Option<&str>, percent: f64) -> Severity {
         _ => Severity::from_percent(percent),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Live quota via `claude --output-format json -p /usage`
+// ---------------------------------------------------------------------------
+
+/// How long to wait for `claude` to respond.
+const CLAUDE_TIMEOUT_SECS: u64 = 25;
+
+/// Candidate binary locations.
+fn claude_binary(home: &std::path::Path) -> Option<PathBuf> {
+    let candidates = [
+        home.join(".local").join("bin").join("claude"),
+        PathBuf::from("/usr/local/bin/claude"),
+        PathBuf::from("/opt/homebrew/bin/claude"),
+    ];
+    // Also check PATH via `which claude` as a last resort.
+    candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .or_else(|| which_claude())
+}
+
+fn which_claude() -> Option<PathBuf> {
+    Command::new("which")
+        .arg("claude")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| PathBuf::from(s.trim()))
+        .filter(|p| p.is_file())
+}
+
+enum LiveQuotaFetch {
+    /// No `claude` binary found.
+    NoBinary,
+    /// Call completed; these are the quota rows we could parse (may be empty).
+    Ok(Vec<QuotaWindow>),
+    /// Binary exists but the call didn't produce usable output.
+    Failed(String),
+}
+
+/// Run `claude --output-format json -p /usage` with a timeout and parse the
+/// output into `QuotaWindow` entries.
+///
+/// The JSON wrapper's `result` field contains human-readable text:
+/// ```text
+/// Current session: 24% used · resets Aug 12, 4:59am (Asia/Seoul)
+/// Current week (all models): 16% used · resets Aug 17, 7:59am (Asia/Seoul)
+/// ```
+fn fetch_live_quotas(home: &std::path::Path) -> LiveQuotaFetch {
+    let Some(binary) = claude_binary(home) else {
+        return LiveQuotaFetch::NoBinary;
+    };
+
+    let mut child = match Command::new(&binary)
+        .args(["--output-format", "json", "-p", "/usage"])
+        .env("HOME", home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => return LiveQuotaFetch::Failed(format!("couldn't start `claude`: {e}")),
+    };
+
+    let stdout = child.stdout.take();
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut stream) = stdout {
+            use std::io::Read;
+            let _ = stream.read_to_end(&mut buf);
+        }
+        let _ = tx.send(buf);
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(CLAUDE_TIMEOUT_SECS)) {
+        Ok(bytes) => {
+            let _ = child.wait();
+            match String::from_utf8(bytes) {
+                Ok(text) => LiveQuotaFetch::Ok(parse_live_quota_output(&text)),
+                Err(_) => {
+                    LiveQuotaFetch::Failed("`claude` printed non-UTF-8 output".into())
+                }
+            }
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            LiveQuotaFetch::Failed(format!(
+                "`claude` didn't respond within {CLAUDE_TIMEOUT_SECS}s"
+            ))
+        }
+    }
+}
+
+/// Parse the text content of `claude --output-format json -p /usage`.
+///
+/// The `result` field of the JSON wrapper (or the raw text if JSON parsing
+/// fails) contains lines like:
+/// ```text
+/// Current session: 24% used · resets Aug 12, 4:59am (Asia/Seoul)
+/// Current week (all models): 16% used · resets Aug 17, 7:59am (Asia/Seoul)
+/// ```
+///
+/// Returns one `QuotaWindow` per recognised line. An unrecognised line is
+/// silently skipped — forward compatibility with new limit types.
+fn parse_live_quota_output(raw: &str) -> Vec<QuotaWindow> {
+    // The `claude --output-format json` wrapper puts the human text in `result`.
+    let text = if let Ok(v) = serde_json::from_str::<Value>(raw) {
+        v.get("result")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| raw.to_owned())
+    } else {
+        raw.to_owned()
+    };
+
+    let mut quotas = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        // "Current session: 24% used"
+        if let Some(rest) = line.strip_prefix("Current session:") {
+            if let Some(pct) = parse_used_percent(rest) {
+                let mut q = QuotaWindow::new("session", "5-hour session", pct)
+                    .window_minutes(Some(300));
+                q.is_active = pct > 0.0;
+                quotas.push(q);
+            }
+            continue;
+        }
+        // "Current week (all models): 16% used"
+        // "Current week (Opus): 34% used" etc.
+        if let Some(rest) = line.strip_prefix("Current week (") {
+            if let Some(paren) = rest.find(')') {
+                let model_group = &rest[..paren];
+                let after_paren = rest[paren + 1..].trim_start_matches(':').trim();
+                if let Some(pct) = parse_used_percent(after_paren) {
+                    let (id, label) = match model_group {
+                        "all models" => (
+                            "weekly_all".to_owned(),
+                            "Weekly (all models)".to_owned(),
+                        ),
+                        other => (
+                            format!("weekly_{}", other.to_lowercase().replace(' ', "_")),
+                            format!("Weekly ({})", other),
+                        ),
+                    };
+                    quotas.push(
+                        QuotaWindow::new(&id, &label, pct).window_minutes(Some(10_080)),
+                    );
+                }
+            }
+            continue;
+        }
+    }
+    quotas
+}
+
+/// Extract the leading integer percent from strings like "24% used · resets …".
+fn parse_used_percent(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let end = s.find('%')?;
+    s[..end].trim().parse::<f64>().ok()
+}
+
+// ---------------------------------------------------------------------------
+// Cached quota from ~/.claude.json
+// ---------------------------------------------------------------------------
 
 fn quota_windows(u: &Utilization) -> Vec<QuotaWindow> {
     let mut out = Vec::new();
@@ -565,6 +795,70 @@ fn humanise_age(secs: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // Live quota parser
+    // -----------------------------------------------------------------------
+
+    const SAMPLE_USAGE: &str = r#"
+{"result":"You are currently using your subscription to power your Claude Code usage\n\nCurrent session: 24% used · resets Aug 12, 4:59am (Asia/Seoul)\nCurrent week (all models): 16% used · resets Aug 17, 7:59am (Asia/Seoul)\n\nWhat's contributing to your limits usage?\n"}
+"#;
+
+    #[test]
+    fn parses_live_session_and_weekly_quotas() {
+        let q = parse_live_quota_output(SAMPLE_USAGE.trim());
+        assert_eq!(q.len(), 2, "session + weekly_all");
+
+        let session = &q[0];
+        assert_eq!(session.id, "session");
+        assert_eq!(session.label, "5-hour session");
+        assert_eq!(session.used_percent, 24.0);
+        assert_eq!(session.window_minutes, Some(300));
+        assert!(session.is_active);
+
+        let weekly = &q[1];
+        assert_eq!(weekly.id, "weekly_all");
+        assert_eq!(weekly.label, "Weekly (all models)");
+        assert_eq!(weekly.used_percent, 16.0);
+        assert_eq!(weekly.window_minutes, Some(10_080));
+    }
+
+    #[test]
+    fn parses_zero_session_as_inactive() {
+        let text = r#"{"result":"Current session: 0% used · resets Aug 12, 5am (Asia/Seoul)\nCurrent week (all models): 34% used · resets Aug 17, 8am (Asia/Seoul)\n"}"#;
+        let q = parse_live_quota_output(text);
+        assert_eq!(q.len(), 2);
+        assert_eq!(q[0].used_percent, 0.0);
+        assert!(!q[0].is_active, "0% session should be inactive");
+        assert_eq!(q[1].used_percent, 34.0);
+    }
+
+    #[test]
+    fn parses_named_weekly_group() {
+        let text = r#"{"result":"Current session: 5% used\nCurrent week (Opus): 78% used\n"}"#;
+        let q = parse_live_quota_output(text);
+        assert_eq!(q.len(), 2);
+        assert_eq!(q[1].id, "weekly_opus");
+        assert_eq!(q[1].label, "Weekly (Opus)");
+        assert_eq!(q[1].used_percent, 78.0);
+    }
+
+    #[test]
+    fn returns_empty_on_unrecognised_output() {
+        let q = parse_live_quota_output("something completely different");
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn falls_back_to_raw_text_when_not_json() {
+        // Plain text (no JSON wrapper) still parses correctly.
+        let text = "Current session: 10% used\nCurrent week (all models): 50% used\n";
+        let q = parse_live_quota_output(text);
+        assert_eq!(q.len(), 2);
+        assert_eq!(q[0].used_percent, 10.0);
+        assert_eq!(q[1].used_percent, 50.0);
+    }
+
     use std::io::Write;
 
     fn temp_dir(name: &str) -> PathBuf {
