@@ -121,18 +121,19 @@ fn position_under(window: &WebviewWindow, rect: tauri::Rect) {
 pub fn refresh_and_publish(app: &AppHandle) {
     let state = app.state::<AppState>();
     let report = state.refresh();
-    apply_title(app, report.peak_percent, state.settings().show_percent_in_menu_bar);
+    apply_title(app, report.peak_percent);
     use tauri::Emitter;
     let _ = app.emit("usage-updated", &report);
 }
 
 /// Update the tray tooltip with the current peak quota percentage.
-/// The tray title is intentionally left empty so only the icon is displayed.
-pub fn apply_title(app: &AppHandle, peak: Option<f64>, _enabled: bool) {
+/// The tray title is always empty so only the icon is displayed.
+pub fn apply_title(app: &AppHandle, peak: Option<f64>) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    // Always clear any title text — icon-only display.
+    // Icon-only display: always clear title text.
+    // (Only macOS renders tray titles; this is a no-op on other platforms.)
     let _ = tray.set_title(None);
     let tooltip = match peak {
         Some(p) => format!("LLM Usage Meter — peak quota {}%", p.round() as i64),

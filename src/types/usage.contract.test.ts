@@ -141,7 +141,6 @@ describe("IPC payload shape vs contract/usage-report-keys.json", () => {
     refreshIntervalSecs: 600,
     lookbackDays: 30,
     disabledProviders: [],
-    showPercentInMenuBar: true,
   };
   check("Settings", settings);
 
