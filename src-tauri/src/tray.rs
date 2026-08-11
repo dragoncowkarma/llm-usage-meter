@@ -126,18 +126,14 @@ pub fn refresh_and_publish(app: &AppHandle) {
     let _ = app.emit("usage-updated", &report);
 }
 
-/// Put the peak quota percentage next to the menu bar icon.
-pub fn apply_title(app: &AppHandle, peak: Option<f64>, enabled: bool) {
+/// Update the tray tooltip with the current peak quota percentage.
+/// The tray title is intentionally left empty so only the icon is displayed.
+pub fn apply_title(app: &AppHandle, peak: Option<f64>, _enabled: bool) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    // Only macOS renders tray title text; elsewhere this is a no-op and the
-    // percentage lives in the tooltip instead.
-    let title = match (enabled, peak) {
-        (true, Some(p)) => Some(format!("{}%", p.round() as i64)),
-        _ => None,
-    };
-    let _ = tray.set_title(title.as_deref());
+    // Always clear any title text — icon-only display.
+    let _ = tray.set_title(None);
     let tooltip = match peak {
         Some(p) => format!("LLM Usage Meter — peak quota {}%", p.round() as i64),
         None => "LLM Usage Meter".to_string(),

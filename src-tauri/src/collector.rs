@@ -31,7 +31,7 @@ impl Default for Settings {
             refresh_interval_secs: 600, // 10 minutes
             lookback_days: 30,
             disabled_providers: Vec::new(),
-            show_percent_in_menu_bar: true,
+            show_percent_in_menu_bar: false,
         }
     }
 }
