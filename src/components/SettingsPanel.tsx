@@ -85,18 +85,6 @@ export default function SettingsPanel({ settings, providers, onChange }: Props) 
         onSelect={(v) => onChange({ ...settings, lookbackDays: v })}
       />
 
-      <label className="flex cursor-pointer items-center justify-between gap-2">
-        <span className="text-[12px] text-stone-700 dark:text-stone-200">
-          Show % in menu bar
-        </span>
-        <input
-          type="checkbox"
-          checked={settings.showPercentInMenuBar}
-          onChange={(e) => onChange({ ...settings, showPercentInMenuBar: e.target.checked })}
-          className="h-3.5 w-3.5 accent-orange-500"
-        />
-      </label>
-
       <div className="space-y-1.5 border-t border-stone-200/60 pt-2 dark:border-stone-700/40">
         <span className="text-[11px] font-medium tracking-wide text-stone-500 uppercase dark:text-stone-300">
           Tools

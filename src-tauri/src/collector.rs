@@ -21,8 +21,6 @@ pub struct Settings {
     pub lookback_days: u32,
     /// Provider ids the user has switched off.
     pub disabled_providers: Vec<String>,
-    /// Show the peak quota percentage as text next to the menu bar icon.
-    pub show_percent_in_menu_bar: bool,
 }
 
 impl Default for Settings {
@@ -31,7 +29,6 @@ impl Default for Settings {
             refresh_interval_secs: 600, // 10 minutes
             lookback_days: 30,
             disabled_providers: Vec::new(),
-            show_percent_in_menu_bar: true,
         }
     }
 }

@@ -98,5 +98,4 @@ export interface Settings {
   refreshIntervalSecs: number;
   lookbackDays: number;
   disabledProviders: string[];
-  showPercentInMenuBar: boolean;
 }
