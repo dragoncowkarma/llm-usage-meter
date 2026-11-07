@@ -134,7 +134,7 @@ pub fn apply_title(app: &AppHandle, peak: Option<f64>) {
     };
     // Icon-only display: always clear title text.
     // (Only macOS renders tray titles; this is a no-op on other platforms.)
-    let _ = tray.set_title(None);
+    let _ = tray.set_title::<&str>(None);
     let tooltip = match peak {
         Some(p) => format!("LLM Usage Meter — peak quota {}%", p.round() as i64),
         None => "LLM Usage Meter".to_string(),
