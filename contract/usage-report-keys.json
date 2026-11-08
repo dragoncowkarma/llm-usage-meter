@@ -45,7 +45,6 @@
   "Settings": [
     "disabledProviders",
     "lookbackDays",
-    "refreshIntervalSecs",
-    "showPercentInMenuBar"
+    "refreshIntervalSecs"
   ]
 }
