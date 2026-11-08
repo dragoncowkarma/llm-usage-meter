@@ -265,24 +265,26 @@ fn window_label(minutes: Option<u32>, fallback: &str) -> String {
 }
 
 fn quota_windows(l: &RateLimits) -> Vec<QuotaWindow> {
+    // Match Codex's remaining-quota display while keeping warnings based on
+    // consumption. As with Antigravity, used_percent carries the UI value.
+    let remaining_quota = |id: &str, window: &LimitWindow, fallback: &str| {
+        let used = window.used_percent.clamp(0.0, 100.0);
+        let mut quota = QuotaWindow::new(
+            id,
+            window_label(window.window_minutes, fallback),
+            100.0 - used,
+        )
+        .resets_at(window.resets_at)
+        .window_minutes(window.window_minutes);
+        quota.severity = Severity::from_percent(used);
+        quota
+    };
     let mut out = Vec::new();
     if let Some(p) = &l.primary {
-        out.push(
-            QuotaWindow::new("primary", window_label(p.window_minutes, "Primary limit"), p.used_percent)
-                .resets_at(p.resets_at)
-                .window_minutes(p.window_minutes),
-        );
+        out.push(remaining_quota("primary", p, "Primary limit"));
     }
     if let Some(s) = &l.secondary {
-        out.push(
-            QuotaWindow::new(
-                "secondary",
-                window_label(s.window_minutes, "Secondary limit"),
-                s.used_percent,
-            )
-            .resets_at(s.resets_at)
-            .window_minutes(s.window_minutes),
-        );
+        out.push(remaining_quota("secondary", s, "Secondary limit"));
     }
     if let Some(c) = &l.credits {
         if c.unlimited.unwrap_or(false) {
@@ -533,9 +535,39 @@ mod tests {
         assert_eq!(q.len(), 1, "secondary is null and must not become a row");
         assert_eq!(q[0].id, "primary");
         assert_eq!(q[0].label, "Weekly limit");
-        assert_eq!(q[0].used_percent, 95.0);
+        assert_eq!(q[0].used_percent, 5.0);
         assert_eq!(q[0].severity, Severity::Critical);
         assert_eq!(q[0].resets_at, Some(1_786_532_172));
+    }
+
+    #[test]
+    fn both_windows_show_remaining_quota_with_consumption_severity() {
+        for (used, remaining, severity) in [
+            (70.0, 30.0, Severity::Normal),
+            (80.0, 20.0, Severity::Warning),
+            (95.0, 5.0, Severity::Critical),
+            (100.0, 0.0, Severity::Critical),
+            (0.0, 100.0, Severity::Normal),
+        ] {
+            let window = LimitWindow {
+                used_percent: used,
+                window_minutes: Some(300),
+                resets_at: Some(1_786_532_172),
+            };
+            let limits = RateLimits {
+                primary: Some(window.clone()),
+                secondary: Some(window),
+                ..Default::default()
+            };
+            let quotas = quota_windows(&limits);
+            assert_eq!(quotas.len(), 2);
+            for quota in quotas {
+                assert_eq!(quota.used_percent, remaining);
+                assert_eq!(quota.severity, severity);
+                assert_eq!(quota.window_minutes, Some(300));
+                assert_eq!(quota.resets_at, Some(1_786_532_172));
+            }
+        }
     }
 
     #[test]
