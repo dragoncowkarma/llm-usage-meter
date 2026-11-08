@@ -66,6 +66,18 @@ pub fn reveal_source(
 }
 
 #[tauri::command]
+pub fn resize_popup(app: AppHandle, height: f64) {
+    if let Some(w) = app.get_webview_window("main") {
+        let pos = w.outer_position().ok();
+        let target_height = height.ceil().max(120.0);
+        let _ = w.set_size(tauri::LogicalSize::new(380.0, target_height));
+        if let Some(pos) = pos {
+            let _ = w.set_position(pos);
+        }
+    }
+}
+
+#[tauri::command]
 pub fn hide_popup(app: AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.hide();

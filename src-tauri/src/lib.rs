@@ -25,6 +25,7 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::reveal_source,
+            commands::resize_popup,
             commands::hide_popup,
             commands::quit_app,
         ])

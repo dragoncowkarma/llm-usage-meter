@@ -29,28 +29,6 @@ body {
   font-feature-settings: "tnum";
 }
 
-/* Thin overlay scrollbar so the list doesn't reserve a gutter. */
-.scroll-area {
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgb(0 0 0 / 0.2) transparent;
-}
-.scroll-area::-webkit-scrollbar {
-  width: 6px;
-}
-.scroll-area::-webkit-scrollbar-thumb {
-  background-color: rgb(0 0 0 / 0.18);
-  border-radius: 3px;
-}
-@media (prefers-color-scheme: dark) {
-  .scroll-area {
-    scrollbar-color: rgb(255 255 255 / 0.22) transparent;
-  }
-  .scroll-area::-webkit-scrollbar-thumb {
-    background-color: rgb(255 255 255 / 0.22);
-  }
-}
-
 @keyframes bar-grow {
   from {
     transform: scaleX(0);

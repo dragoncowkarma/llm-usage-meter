@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import Header from "./components/Header";
@@ -12,11 +12,25 @@ export default function App() {
   const { report, settings, providers, loading, error, now, load, refresh, saveSettings } =
     useUsageStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void load();
     return subscribeToBackend();
   }, [load]);
+
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const syncHeight = () => {
+      const height = Math.ceil(el.getBoundingClientRect().height);
+      if (height > 0) void invoke("resize_popup", { height });
+    };
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Esc dismisses the popover, matching every other menu bar app.
   useEffect(() => {
@@ -28,7 +42,10 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-black/10 bg-stone-50/90 backdrop-blur-2xl dark:border-white/10 dark:bg-stone-950/92">
+    <div
+      ref={panelRef}
+      className="flex flex-col overflow-hidden rounded-xl border border-black/10 bg-stone-50/90 backdrop-blur-2xl dark:border-white/10 dark:bg-stone-950/92"
+    >
       <Header
         peakPercent={report?.peakPercent ?? null}
         loading={loading}
@@ -45,7 +62,7 @@ export default function App() {
         />
       )}
 
-      <main className="scroll-area flex-1 space-y-2 px-3 py-2.5">
+      <main className="space-y-2 px-3 py-2.5">
         {error && (
           <div className="rounded-lg bg-rose-500/10 px-2.5 py-2 text-[12px] leading-relaxed text-rose-700 dark:text-rose-300">
             {error}
